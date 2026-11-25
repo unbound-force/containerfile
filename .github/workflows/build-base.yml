@@ -1,11 +1,18 @@
 # build-base.yml — Multi-arch base image build and push
 #
-# Builds opencode-base (Fedora 41 + Go + system packages) for
-# linux/arm64 and linux/amd64 using native runners (no QEMU).
+# Builds opencode-base (Fedora 41 + Go + system packages) for linux/arm64
+# and linux/amd64 on native runners (no QEMU), through jflowers/ship's
+# shared container-image.yml: build, smoke test, then one multi-arch
+# manifest.
 #
 # Triggers:
 #   - Weekly schedule (Monday 04:00 UTC)
 #   - Manual dispatch
+#   - Pull request changing Containerfile.base or this file: build + smoke
+#     test only (no push)
+#
+# GitHub disables a scheduled workflow after 60 days without repository
+# activity; re-enable it under Actions if the weekly build stops.
 #
 # Requirements: FR-024, FR-027
 
@@ -15,111 +22,40 @@ on:
   schedule:
     - cron: "0 4 * * 1"
   workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths: ["Containerfile.base", ".github/workflows/build-base.yml"]
 
-env:
-  REGISTRY: quay.io
-  IMAGE_NAME: unbound-force/opencode-base
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  build-amd64:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+  image:
+    name: opencode-base
+    uses: jflowers/ship/.github/workflows/container-image.yml@7c6c0e199099d732e0db93c8c9d86b0064c2759c # v0.9.0
+    with:
+      image: quay.io/unbound-force/opencode-base
+      containerfile: Containerfile.base
+      tags: latest
+      push: ${{ github.event_name != 'pull_request' }}
+      smoke: |
+        echo "==> Base image smoke tests ..."
+        podman run --rm --entrypoint go "$IMAGE" version
+        podman run --rm --entrypoint node "$IMAGE" --version
+        podman run --rm --entrypoint git "$IMAGE" --version
+        podman run --rm --entrypoint gh "$IMAGE" --version
 
-      - name: Build base image (amd64)
-        run: podman build -t opencode-base-amd64 -f Containerfile.base .
-
-      - name: Smoke test (amd64)
-        run: |
-          echo "==> Base image smoke tests (amd64) ..."
-          podman run --rm --entrypoint go opencode-base-amd64 version
-          podman run --rm --entrypoint node opencode-base-amd64 --version
-          podman run --rm --entrypoint git opencode-base-amd64 --version
-          podman run --rm --entrypoint gh opencode-base-amd64 --version
-
-          USER_OUTPUT=$(podman run --rm --entrypoint whoami opencode-base-amd64)
-          if [ "$USER_OUTPUT" != "dev" ]; then
-            echo "ERROR: Expected 'dev' but got '$USER_OUTPUT'"
-            exit 1
-          fi
-          echo "All base image smoke tests passed (amd64)"
-
-      - name: Save image
-        run: podman save opencode-base-amd64 -o /tmp/opencode-base-amd64.tar
-
-      - name: Upload image artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: opencode-base-amd64
-          path: /tmp/opencode-base-amd64.tar
-          retention-days: 1
-
-  build-arm64:
-    runs-on: ubuntu-24.04-arm
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Build base image (arm64)
-        run: podman build -t opencode-base-arm64 -f Containerfile.base .
-
-      - name: Smoke test (arm64)
-        run: |
-          echo "==> Base image smoke tests (arm64) ..."
-          podman run --rm --entrypoint go opencode-base-arm64 version
-          podman run --rm --entrypoint node opencode-base-arm64 --version
-          podman run --rm --entrypoint git opencode-base-arm64 --version
-          podman run --rm --entrypoint gh opencode-base-arm64 --version
-
-          USER_OUTPUT=$(podman run --rm --entrypoint whoami opencode-base-arm64)
-          if [ "$USER_OUTPUT" != "dev" ]; then
-            echo "ERROR: Expected 'dev' but got '$USER_OUTPUT'"
-            exit 1
-          fi
-          echo "All base image smoke tests passed (arm64)"
-
-      - name: Save image
-        run: podman save opencode-base-arm64 -o /tmp/opencode-base-arm64.tar
-
-      - name: Upload image artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: opencode-base-arm64
-          path: /tmp/opencode-base-arm64.tar
-          retention-days: 1
-
-  push-manifest:
-    needs: [build-amd64, build-arm64]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download amd64 image
-        uses: actions/download-artifact@v4
-        with:
-          name: opencode-base-amd64
-          path: /tmp
-
-      - name: Download arm64 image
-        uses: actions/download-artifact@v4
-        with:
-          name: opencode-base-arm64
-          path: /tmp
-
-      - name: Load images
-        run: |
-          podman load -i /tmp/opencode-base-amd64.tar
-          podman load -i /tmp/opencode-base-arm64.tar
-
-      - name: Login to quay.io
-        run: |
-          podman login quay.io \
-            -u "${{ secrets.QUAY_USERNAME }}" \
-            -p "${{ secrets.QUAY_PASSWORD }}"
-
-      - name: Create and push manifest
-        run: |
-          podman manifest create opencode-base
-          podman manifest add opencode-base containers-storage:localhost/opencode-base-amd64
-          podman manifest add opencode-base containers-storage:localhost/opencode-base-arm64
-          podman manifest push opencode-base \
-            "docker://${REGISTRY}/${IMAGE_NAME}:latest"
+        USER_OUTPUT=$(podman run --rm --entrypoint whoami "$IMAGE")
+        if [ "$USER_OUTPUT" != "dev" ]; then
+          echo "ERROR: Expected 'dev' but got '$USER_OUTPUT'"
+          exit 1
+        fi
+        echo "All base image smoke tests passed"
+    permissions:
+      contents: read
+    secrets:
+      REGISTRY_USERNAME: ${{ secrets.QUAY_USERNAME }}
+      REGISTRY_PASSWORD: ${{ secrets.QUAY_PASSWORD }}

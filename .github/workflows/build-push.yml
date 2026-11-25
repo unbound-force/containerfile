@@ -1,12 +1,13 @@
 # build-push.yml — Multi-arch dev image build and push
 #
-# Builds opencode-dev for linux/arm64 and linux/amd64 using native
-# runners (no QEMU). Uses opencode-base as the foundation layer.
+# Builds opencode-dev for linux/arm64 and linux/amd64 on native runners (no
+# QEMU), on top of opencode-base, through jflowers/ship's shared
+# container-image.yml: build, smoke test, then one multi-arch manifest.
 #
 # Triggers:
 #   - Push to main: build + push with "latest" tag
-#   - Version tag (v*): build + push with version tag
-#   - Pull request: build only (no push) for validation
+#   - Version tag (v*): build + push with the version tag and "latest"
+#   - Pull request: build + smoke test only (no push)
 #
 # Requirements: FR-017, FR-026
 
@@ -19,142 +20,44 @@ on:
   pull_request:
     branches: [main]
 
-env:
-  REGISTRY: quay.io
-  IMAGE_NAME: unbound-force/opencode-dev
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  build-amd64:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+  image:
+    name: opencode-dev
+    uses: jflowers/ship/.github/workflows/container-image.yml@7c6c0e199099d732e0db93c8c9d86b0064c2759c # v0.9.0
+    with:
+      image: quay.io/unbound-force/opencode-dev
+      containerfile: Containerfile
+      tags: ${{ github.ref_type == 'tag' && format('{0} latest', github.ref_name) || 'latest' }}
+      push: ${{ github.event_name == 'push' }}
+      smoke: |
+        echo "==> Smoke tests ..."
+        podman run --rm "$IMAGE" uf --version
+        podman run --rm "$IMAGE" opencode --version
+        podman run --rm "$IMAGE" dewey version
+        podman run --rm "$IMAGE" replicator --version
+        podman run --rm "$IMAGE" gaze --version
+        podman run --rm "$IMAGE" go version
+        podman run --rm "$IMAGE" golangci-lint --version
+        podman run --rm --entrypoint which "$IMAGE" govulncheck
+        podman run --rm "$IMAGE" node --version
+        podman run --rm "$IMAGE" npm --version
+        podman run --rm "$IMAGE" git --version
+        podman run --rm "$IMAGE" gh --version
 
-      - name: Build dev image (amd64)
-        run: podman build -t opencode-dev-amd64 -f Containerfile .
-
-      - name: Smoke test (amd64)
-        run: |
-          echo "==> Smoke tests (amd64) ..."
-          podman run --rm opencode-dev-amd64 uf --version
-          podman run --rm opencode-dev-amd64 opencode --version
-          podman run --rm opencode-dev-amd64 dewey version
-          podman run --rm opencode-dev-amd64 replicator --version
-          podman run --rm opencode-dev-amd64 gaze --version
-          podman run --rm opencode-dev-amd64 go version
-          podman run --rm opencode-dev-amd64 golangci-lint --version
-          podman run --rm --entrypoint which opencode-dev-amd64 govulncheck
-          podman run --rm opencode-dev-amd64 node --version
-          podman run --rm opencode-dev-amd64 npm --version
-          podman run --rm opencode-dev-amd64 git --version
-          podman run --rm opencode-dev-amd64 gh --version
-
-          USER_OUTPUT=$(podman run --rm --entrypoint whoami opencode-dev-amd64)
-          if [ "$USER_OUTPUT" != "dev" ]; then
-            echo "ERROR: Expected 'dev' but got '$USER_OUTPUT'"
-            exit 1
-          fi
-          echo "All smoke tests passed (amd64)"
-
-      - name: Save image
-        run: podman save opencode-dev-amd64 -o /tmp/opencode-dev-amd64.tar
-
-      - name: Upload image artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: opencode-dev-amd64
-          path: /tmp/opencode-dev-amd64.tar
-          retention-days: 1
-
-  build-arm64:
-    runs-on: ubuntu-24.04-arm
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Build dev image (arm64)
-        run: podman build -t opencode-dev-arm64 -f Containerfile .
-
-      - name: Smoke test (arm64)
-        run: |
-          echo "==> Smoke tests (arm64) ..."
-          podman run --rm opencode-dev-arm64 uf --version
-          podman run --rm opencode-dev-arm64 opencode --version
-          podman run --rm opencode-dev-arm64 dewey version
-          podman run --rm opencode-dev-arm64 replicator --version
-          podman run --rm opencode-dev-arm64 gaze --version
-          podman run --rm opencode-dev-arm64 go version
-          podman run --rm opencode-dev-arm64 golangci-lint --version
-          podman run --rm --entrypoint which opencode-dev-arm64 govulncheck
-          podman run --rm opencode-dev-arm64 node --version
-          podman run --rm opencode-dev-arm64 npm --version
-          podman run --rm opencode-dev-arm64 git --version
-          podman run --rm opencode-dev-arm64 gh --version
-
-          USER_OUTPUT=$(podman run --rm --entrypoint whoami opencode-dev-arm64)
-          if [ "$USER_OUTPUT" != "dev" ]; then
-            echo "ERROR: Expected 'dev' but got '$USER_OUTPUT'"
-            exit 1
-          fi
-          echo "All smoke tests passed (arm64)"
-
-      - name: Save image
-        run: podman save opencode-dev-arm64 -o /tmp/opencode-dev-arm64.tar
-
-      - name: Upload image artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: opencode-dev-arm64
-          path: /tmp/opencode-dev-arm64.tar
-          retention-days: 1
-
-  push-manifest:
-    if: github.event_name == 'push'
-    needs: [build-amd64, build-arm64]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Determine image tag
-        id: tags
-        run: |
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=latest" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Download amd64 image
-        uses: actions/download-artifact@v4
-        with:
-          name: opencode-dev-amd64
-          path: /tmp
-
-      - name: Download arm64 image
-        uses: actions/download-artifact@v4
-        with:
-          name: opencode-dev-arm64
-          path: /tmp
-
-      - name: Load images
-        run: |
-          podman load -i /tmp/opencode-dev-amd64.tar
-          podman load -i /tmp/opencode-dev-arm64.tar
-
-      - name: Login to quay.io
-        run: |
-          podman login quay.io \
-            -u "${{ secrets.QUAY_USERNAME }}" \
-            -p "${{ secrets.QUAY_PASSWORD }}"
-
-      - name: Create and push manifest
-        run: |
-          podman manifest create opencode-dev
-          podman manifest add opencode-dev containers-storage:localhost/opencode-dev-amd64
-          podman manifest add opencode-dev containers-storage:localhost/opencode-dev-arm64
-          podman manifest push opencode-dev \
-            "docker://${REGISTRY}/${IMAGE_NAME}:${{ steps.tags.outputs.tag }}"
-
-      - name: Push latest tag (version tag push)
-        if: github.ref_type == 'tag'
-        run: |
-          podman manifest push opencode-dev \
-            "docker://${REGISTRY}/${IMAGE_NAME}:latest"
+        USER_OUTPUT=$(podman run --rm --entrypoint whoami "$IMAGE")
+        if [ "$USER_OUTPUT" != "dev" ]; then
+          echo "ERROR: Expected 'dev' but got '$USER_OUTPUT'"
+          exit 1
+        fi
+        echo "All smoke tests passed"
+    permissions:
+      contents: read
+    secrets:
+      REGISTRY_USERNAME: ${{ secrets.QUAY_USERNAME }}
+      REGISTRY_PASSWORD: ${{ secrets.QUAY_PASSWORD }}
