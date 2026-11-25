@@ -193,48 +193,43 @@ Exempt from council review:
   artifacts)
 - Emergency hotfixes (must be retroactively reviewed)
 
-## Spec-First Development
+## Workflow Tiers
 
-All changes that modify production code, test code, agent
-prompts, embedded assets, or CI configuration **must** be
-preceded by a spec workflow. The constitution
-(`.specify/memory/constitution.md`) is the highest-
-authority document in this project — all work must align
-with it.
+Every change follows a workflow, but **which** workflow
+is decided per change -- no single tier is mandatory.
+Pick the tier that fits the change's scope and risk.
+`/uf.unleash` does this automatically through the
+`tier-routing` skill when no spec exists yet; agents
+working by hand apply the same rubric. The constitution
+(`.specify/memory/constitution.md`) remains the highest-
+authority document in this project -- all work must
+align with it, whatever the tier.
 
-Two spec workflows are available:
+| Tier | Choose when | Artifacts | Branch |
+|------|-------------|-----------|--------|
+| **Speckit** (strategic) | New capability or cross-cutting change: 3+ stories, multiple subsystems, cross-repo | `specs/NNN-name/` | `NNN-<name>` |
+| **OpenSpec** (tactical) | Focused feature or non-trivial fix: 1-2 stories, bounded blast radius | `openspec/changes/name/` | `opsx/<name>` |
+| **Quick** | Trivial fix, chore, dependency bump, or docs change where ceremony exceeds value | None -- CI green plus code review | `quick/<name>` |
 
-| Workflow | Location | Best For |
-|----------|----------|----------|
-| **Speckit** | `specs/NNN-name/` | Numbered feature specs with the full pipeline |
-| **OpenSpec** | `openspec/changes/name/` | Targeted changes with lightweight artifacts |
+**Scope signals**: wording ("add a capability", "new
+subsystem", "migrate" point heavier; "fix typo", "bump
+version", "update docs" point to Quick), how many files
+and subsystems the change reaches, and how many user
+stories it implies. When signals conflict between two
+adjacent tiers, choose the heavier one.
 
-**What requires a spec** (no exceptions without explicit
-user override):
+**Risk floors** (escalate only): a change that touches
+security-sensitive code (secrets, tokens, crypto,
+permissions), authentication or authorization flows,
+data-loss paths (migrations, deletions, destructive
+operations), or breaks a public API contract **must**
+use OpenSpec at minimum -- never Quick.
 
-- New features or capabilities
-- Refactoring that changes function signatures, extracts
-  helpers, or moves code between packages
-- Test additions or assertion strengthening across
-  multiple functions
-- Agent prompt changes
-- CI workflow modifications
-- Data model changes (new struct fields, schema updates)
-
-**What is exempt** (may be done directly):
-
-- Constitution amendments (governed by the constitution's
-  own Governance section)
-- Typo corrections, comment-only changes, single-line
-  formatting fixes
-- Emergency hotfixes for critical production bugs (must
-  be retroactively documented)
-
-When an agent is unsure whether a change is trivial, it
-**must** ask the user rather than proceeding without a
-spec. The cost of an unnecessary spec is minutes; the
-cost of an unplanned change is rework, drift, and broken
-CI.
+**Quality gates apply to every tier.** Quick skips spec
+artifacts, not review: CI must pass and the change still
+goes through code review (`/uf.review-council`) before
+merge. Constitution amendments follow the constitution's
+own Governance section.
 
 ### Website Documentation Gate
 
@@ -268,17 +263,20 @@ gh issue create --repo unbound-force/website \
 
 ## Specification Framework
 
-This project uses a two-tier specification framework:
+This project uses a three-tier workflow framework (see
+Workflow Tiers above for how a tier is chosen):
 
 | Tier | Tool | When to Use | Location |
 |------|------|-------------|----------|
 | Strategic | Speckit | 3+ stories, architecture | `specs/NNN-*/` |
 | Tactical | OpenSpec | <3 stories, bug fix | `openspec/changes/` |
+| Quick | `/uf.unleash` routing | trivial fixes, chores, docs | `quick/<name>` branch |
 
 ### Branch Conventions
 
 - **Speckit**: `NNN-<short-name>` (e.g., `001-initial-containerfile`)
 - **OpenSpec**: `opsx/<change-name>` (e.g., `opsx/fix-entrypoint`)
+- **Quick**: `quick/<change-name>` (created by `/uf.unleash` tier routing)
 
 ### Ordering Constraints
 

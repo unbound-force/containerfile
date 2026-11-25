@@ -1,33 +1,23 @@
 <!--
   SYNC IMPACT REPORT
   ==================
-  Version change: (none) → 1.0.0 (initial ratification)
+  Version change: 1.0.0 → 1.1.0 (MINOR: Spec-First Development
+    replaced by Tier-Routed Workflow)
+  Amendment date: 2026-11-25
 
-  Added principles:
-    - I. Composability First (from org constitution + dewey)
-    - II. Security Through Isolation (derived from Discussion #88)
-    - III. Reproducible Builds (adapted from org Observable Quality)
-    - IV. Executable Truth (derived from AGENTS.md behavioral constraints)
+  Modified sections:
+    - Development Workflow: "Spec-First Development" (every
+      non-trivial change needs Speckit or OpenSpec) replaced by
+      "Tier-Routed Workflow" — Speckit, OpenSpec, or Quick chosen
+      per change, matching /uf.unleash tier routing. Risk floors
+      keep security, auth, data-loss, and API-breaking changes out
+      of Quick. Branch naming gains `quick/<name>`.
 
-  Added sections:
-    - Development Workflow
-    - Governance
+  Unchanged principles: all
 
-  Removed template sections:
-    - [SECTION_2_NAME] (folded into principles)
-    - [SECTION_3_NAME] (replaced by Development Workflow)
-    - Principle 5 (4 principles sufficient)
-
-  Templates requiring updates:
-    ✅ .specify/templates/plan-template.md — no changes needed;
-       Constitution Check section is generic and will align at
-       plan time using these four principles.
-    ✅ .specify/templates/spec-template.md — no changes needed;
-       requirements format already uses MUST/SHOULD language.
-    ✅ .specify/templates/tasks-template.md — no changes needed;
-       task phases are feature-driven, not principle-specific.
-
-  Deferred TODOs: none
+  Previous version history:
+    - 1.0.0 (2026-04-11): Initial ratification with 4 principles,
+      Development Workflow, Governance
 -->
 
 # Containerfile Constitution
@@ -152,13 +142,25 @@ its place.
 
 ## Development Workflow
 
-- **Spec-First Development**: All non-trivial changes
-  MUST be preceded by a spec workflow (Speckit for 3+
-  stories, OpenSpec for smaller changes). Exempt:
-  constitution amendments, typo fixes, single-line
-  config changes.
+- **Tier-Routed Workflow**: Every change MUST follow a workflow
+  tier chosen for that change's scope and risk; no single tier is
+  mandatory. Speckit (`specs/NNN-<name>/`) for strategic work: 3+
+  user stories, cross-cutting or cross-repo. OpenSpec
+  (`openspec/changes/<name>/`) for tactical work: 1-2 stories,
+  bounded blast radius. Quick (no spec artifacts) for trivial
+  fixes, chores, and docs changes where ceremony exceeds value.
+  `/uf.unleash` routes a change with no spec through the
+  `tier-routing` rubric; manual work applies the same rubric.
+  Risk floors escalate only: security-sensitive code,
+  authentication or authorization flows, data-loss paths, or a
+  public API break MUST use OpenSpec at minimum, never Quick.
+  When signals conflict between adjacent tiers, choose the
+  heavier one. Every tier, Quick included, keeps the full
+  quality gates (CI, code review). Constitution amendments follow
+  the Governance section.
 - **Branching**: All work MUST occur on feature branches.
   Speckit: `NNN-<name>`. OpenSpec: `opsx/<name>`.
+  Quick: `quick/<name>`.
 - **Code Review**: Every pull request MUST receive at
   least one approving review before merge.
 - **Continuous Integration**: The CI pipeline MUST pass
@@ -205,4 +207,4 @@ prevails.
   principles. Constitution violations are CRITICAL
   severity and non-negotiable.
 
-**Version**: 1.0.0 | **Ratified**: 2026-04-11 | **Last Amended**: 2026-04-11
+**Version**: 1.1.0 | **Ratified**: 2026-04-11 | **Last Amended**: 2026-11-25
