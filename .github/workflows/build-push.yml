@@ -7,7 +7,10 @@
 # Triggers:
 #   - Push to main: build + push with "latest" tag
 #   - Version tag (v*): build + push with the version tag and "latest"
-#   - Pull request: build + smoke test only (no push)
+#   - Pull request: build + smoke test only (no push). Chore PRs (Dewey
+#     learnings, gh-hud toolkit rollouts) skip the build: see the scope job.
+#
+# "CI OK" is the required check on main (safe-settings in unbound-force/.github).
 #
 # Requirements: FR-017, FR-026
 
@@ -27,8 +30,19 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # code == 'false' only for PRs that touch nothing but Dewey learnings
+  # or a gh-hud toolkit rollout's .opencode/ files. Pushes are always 'true'.
+  scope:
+    uses: jflowers/ship/.github/workflows/pr-scope.yml@3b0ce8bf47183be402df9eaec16644c213eee5f7 # main, after v0.11.0
+    permissions:
+      contents: read
+
   image:
     name: opencode-dev
+    needs: scope
+    # Pushes (main, tags) build and push whatever scope did; only pull
+    # requests consult it.
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.scope.outputs.code == 'true') }}
     uses: jflowers/ship/.github/workflows/container-image.yml@7c6c0e199099d732e0db93c8c9d86b0064c2759c # v0.9.0
     with:
       image: quay.io/unbound-force/opencode-dev
@@ -61,3 +75,31 @@ jobs:
     secrets:
       REGISTRY_USERNAME: ${{ secrets.QUAY_USERNAME }}
       REGISTRY_PASSWORD: ${{ secrets.QUAY_PASSWORD }}
+
+  # Required check. Passes only when scope succeeded and the image build
+  # ran and passed (code PRs, pushes) or was skipped (chore PRs). A
+  # skipped reusable-workflow job reports none of its inner checks, and a
+  # skipped job counts as passing, so a failed scope job must fail here.
+  ci-ok:
+    name: CI OK
+    needs: [scope, image]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Check needed jobs
+        env:
+          SCOPE: ${{ needs.scope.result }}
+          CODE: ${{ needs.scope.outputs.code }}
+          IMAGE: ${{ needs.image.result }}
+        run: |
+          echo "scope=$SCOPE code=$CODE image=$IMAGE"
+          [ "$SCOPE" = success ] || { echo "::error::scope: $SCOPE"; exit 1; }
+          case "$CODE" in
+            true) want=success ;;
+            false) want=skipped ;;
+            *) echo "::error::scope code '$CODE'"; exit 1 ;;
+          esac
+          [ "$IMAGE" = "$want" ] || { echo "::error::opencode-dev: $IMAGE, want $want"; exit 1; }
+          echo "CI passed."
